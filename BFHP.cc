@@ -90,10 +90,12 @@ uint16_t numberOfWifi;
 uint16_t lteRadius;
 uint16_t wifiRadius;
 uint16_t maxHandoverTime;
-
+bool originalMethod;
 Ptr<MobilityModel> mob;
 NodeContainer wifiNodes;
 NodeContainer wifiApNode;
+
+
 
 double checkDistance(int ap_index, double posx, double posy,int type)
 {
@@ -112,28 +114,95 @@ double checkDistance(int ap_index, double posx, double posy,int type)
     return tmp;
 }
 
-void requestHandover(int userindex, int type, int id)
+bool connectUMTS(int userIndex){
+    if(userList[userIndex].bsType!=UMTS){
+        userList[userIndex].handoverTime++;
+    }
+    userList[userIndex].bsType=UMTS;
+    userList[userIndex].bsId=0;
+    return true;
+}
+
+bool connectLTE(int userIndex, int min_enb_ap){
+    if(!(userList[userIndex].bsType==LTE && userList[userIndex].bsId==min_enb_ap))
+        userList[userIndex].handoverTime++;
+    if(eNbList[min_enb_ap].userNum>MAXLTEUSER){
+        eNbList[min_enb_ap].failNum++;
+        return false;
+    }else{
+        eNbList[min_enb_ap].userNum++;
+        userList[userIndex].bsType=LTE;
+        userList[userIndex].bsId=min_enb_ap;
+        return true;
+    }
+}
+
+bool connectWiFi(int userIndex, int min_wifi_ap){
+    if(!(userList[userIndex].bsType==WIFI && userList[userIndex].bsId==min_wifi_ap))
+        userList[userIndex].handoverTime++;
+    if(wifiApList[min_wifi_ap].userNum>MAXWIFIUSER){
+        wifiApList[min_wifi_ap].failNum++;
+        return false;
+    }else{
+        wifiApList[min_wifi_ap].userNum++;
+        userList[userIndex].bsType=WIFI;
+        userList[userIndex].bsId=min_wifi_ap;
+        return true;
+    }
+}
+
+void requestHandover(int userIndex, bool isConnectLte, bool isConnectWiFi, int min_enb_ap, int min_wifi_ap)
 {
-    user u=userList[userindex];
+    user u=userList[userIndex];
     if(u.bsType==WIFI){
         wifiApList[u.bsId].userNum--;
     }else if(u.bsType==LTE){
         eNbList[u.bsId].userNum--;
     }
-    if(type==WIFI){
-        wifiApList[id].userNum++;
-    }else if(type==LTE){
-        eNbList[id].userNum++;
+    
+    if(isConnectWiFi==false && isConnectLte==false){
+        connectUMTS(userIndex);
+    }else if(isConnectWiFi==false && isConnectLte==true){
+        if(!connectLTE(userIndex, min_enb_ap)){
+            connectUMTS(userIndex);
+        }
     }
-    userList[userindex].bsType=type;
-    userList[userindex].bsId=id;
-    //if(userindex==1)cout<<u.bsType<<" "<<type<<endl;
-    if(u.bsType!=type) {
-        //cout<<userList[userindex].bsType<<" "<<userList[userindex].bsId<<" => "<<type<<" "<<id<<endl;
-        userList[userindex].handoverTime++;
-        
+    else if(isConnectWiFi==true && isConnectLte==false){
+        if(!connectWiFi(userIndex, min_wifi_ap)){
+            connectUMTS(userIndex);
+        }
+    }
+    else if(isConnectWiFi==true && isConnectLte==true){
+        if(!connectLTE(userIndex, min_enb_ap)){
+            if(!connectWiFi(userIndex, min_wifi_ap)){
+                connectUMTS(userIndex);
+            }
+        }
     }
 }
+
+// void requestHandover(int userindex, int type, int id)
+// {
+//     user u=userList[userindex];
+//     if(u.bsType==WIFI){
+//         wifiApList[u.bsId].userNum--;
+//     }else if(u.bsType==LTE){
+//         eNbList[u.bsId].userNum--;
+//     }
+//     if(type==WIFI){
+//         wifiApList[id].userNum++;
+//     }else if(type==LTE){
+//         eNbList[id].userNum++;
+//     }
+//     userList[userindex].bsType=type;
+//     userList[userindex].bsId=id;
+//     //if(userindex==1)cout<<u.bsType<<" "<<type<<endl;
+//     if(u.bsType!=type) {
+//         //cout<<userList[userindex].bsType<<" "<<userList[userindex].bsId<<" => "<<type<<" "<<id<<endl;
+//         userList[userindex].handoverTime++;
+        
+//     }
+// }
 
 void UpdateState()
 {
@@ -142,9 +211,12 @@ void UpdateState()
     {
         //BFHP
         user u=userList[i];
-        if(u.handoverTime>=maxHandoverTime){
-            u.bsType=UMTS;
-            continue;
+        if(!originalMethod){
+            if(u.handoverTime>=maxHandoverTime){
+                userList[i].bsType=UMTS;
+                userList[i].id=0;
+                continue;
+            }
         }
         mob = wifiNodes.Get(i)->GetObject<MobilityModel>();
         Vector pos = mob->GetPosition ();
@@ -176,23 +248,24 @@ void UpdateState()
         if(min_enb_dis == lteRadius*2*MAXLTEGRID+100)
             isConnectLte=false;
 
-        int newBsType=UMTS, newId=0;
-        if(isConnectWiFi==false && isConnectLte==false){
-            newBsType=UMTS;
-            newId=0;
-        }else if(isConnectWiFi==false && isConnectLte==true){
-            newBsType=LTE;
-            newId=min_enb_ap;
-        }else if(isConnectWiFi==true && isConnectLte==false){
-            newBsType=WIFI;
-            newId=min_wifi_ap;
-        }else if(isConnectWiFi==true && isConnectLte==true){
-            newBsType=LTE;
-            newId=min_enb_ap;
-        }
-        //if(i==1)cout<<userList[i].bsType<<" => ";
-        requestHandover(i, newBsType, newId);
-        //if(i==1)cout<<userList[i].bsType<<endl;
+        // int newBsType=UMTS, newId=0;
+        // if(isConnectWiFi==false && isConnectLte==false){
+        //     newBsType=UMTS;
+        //     newId=0;
+        // }else if(isConnectWiFi==false && isConnectLte==true){
+        //     newBsType=LTE;
+        //     newId=min_enb_ap;
+        // }else if(isConnectWiFi==true && isConnectLte==false){
+        //     newBsType=WIFI;
+        //     newId=min_wifi_ap;
+        // }else if(isConnectWiFi==true && isConnectLte==true){
+        //     newBsType=LTE;
+        //     newId=min_enb_ap;
+        // }
+        ////if(i==1)cout<<userList[i].bsType<<" => ";
+        //requestHandover(i, newBsType, newId);
+        requestHandover(i, isConnectLte, isConnectWiFi, min_enb_ap, min_wifi_ap);
+        ////if(i==1)cout<<userList[i].bsType<<endl;
     }
 
     for(int i=0;i<eNbList.size();++i){
@@ -214,25 +287,24 @@ void Reload(){
 }
 
 void Result(){
-    long long int sum=0;
+    long long int handoverSum=0, failureSum=0;
     cout<<"---average handover time---"<<endl;
     for(int i=0;i<userList.size();++i){
-        sum+=userList[i].handoverTime;
+        handoverSum+=userList[i].handoverTime;
         //cout<<"node "<<i<<" "<<userList[i].handoverTime<<endl;
     }
-    cout<<(double)sum/(double)userList.size()<<endl;
-    cout<<"---overall fail rate---"<<endl;
-    sum=0;
+    cout<<(double)handoverSum/(double)userList.size()<<endl;
+    cout<<"---handover failure rate---"<<endl;
     for(int i=0;i<eNbList.size();++i){
-        sum+=eNbList[i].failNum;
+        failureSum+=eNbList[i].failNum;
         //cout<<"node "<<i<<" "<<userList[i].handoverTime<<endl;
     }
     for(int i=0;i<wifiApList.size();++i){
-        sum+=wifiApList[i].failNum;
+        failureSum+=wifiApList[i].failNum;
         //cout<<"node "<<i<<" "<<userList[i].handoverTime<<endl;
     }
-    //cout<<sum<<endl;
-    cout<<(double)sum/(double)(userList.size()*simTime/POLLINGTIME)<<endl;
+    //cout<<failureSum<<endl;
+    cout<<(double)failureSum/(double)(userList.size()*simTime/POLLINGTIME)<<endl;
 
 }
 
@@ -247,6 +319,7 @@ int main (int argc, char *argv[])
     wifiRadius = 125;
     maxHandoverTime = 10;
     simTime = 1000;
+    originalMethod=false;
     double UmtsLteHoTime = 0.7;
     double LteWifiHoTime = 0.3;
     double UmtsWifiTime = LteWifiHoTime+UmtsLteHoTime;
@@ -255,11 +328,12 @@ int main (int argc, char *argv[])
     cmd.AddValue ("numberOfUes", "Number of UEs", numberOfUes);
     cmd.AddValue ("numberOfEnbs", "Number of eNodeBs", numberOfEnbs);
     cmd.AddValue ("numberOfWifi", "Number of WiFi", numberOfWifi);
-    cmd.AddValue ("", "Total duration of the simulation (in seconds)", simTime);
+    cmd.AddValue ("simTime", "Total duration of the simulation (in seconds)", simTime);
     cmd.AddValue ("UmtsLteHoTime", "srvcc handover time", UmtsLteHoTime);
     cmd.AddValue ("LteWifiHoTime", "vowifi handover time", LteWifiHoTime);
     cmd.AddValue ("maxHandoverTime", "vowifi handover time", maxHandoverTime);
     cmd.AddValue ("traceFile", "path of trace file", traceFile);
+    cmd.AddValue ("originalMethod", "enable original method or not", originalMethod);
     cmd.Parse (argc, argv);
 
     cout<<traceFile<<endl;
@@ -345,7 +419,7 @@ int main (int argc, char *argv[])
     // mobility.SetMobilityModel ("ns3::RandomWalk2dMobilityModel",
     //                              "Bounds", RectangleValue (Rectangle (-50, 50, -50, 50)));
     // mobility.Install (wifiNodes);
-    AnimationInterface anim ("animation.xml");
+    //AnimationInterface anim ("animation.xml");
     Simulator::Schedule(Seconds(0.0), &Reload);
     Simulator::Stop (Seconds (simTime));
     Simulator::Run ();

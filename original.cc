@@ -112,28 +112,95 @@ double checkDistance(int ap_index, double posx, double posy,int type)
     return tmp;
 }
 
-void requestHandover(int userindex, int type, int id)
+bool connectUMTS(int userIndex){
+    if(userList[userIndex].bsType!=UMTS){
+        userList[userIndex].handoverTime++;
+    }
+    userList[userIndex].bsType=UMTS;
+    userList[userIndex].bsId=0;
+    return true;
+}
+
+bool connectLTE(int userIndex, int min_enb_ap){
+    if(!(userList[userIndex].bsType==LTE && userList[userIndex].bsId==min_enb_ap))
+        userList[userIndex].handoverTime++;
+    if(eNbList[min_enb_ap].userNum>MAXLTEUSER){
+        eNbList[min_enb_ap].failNum++;
+        return false;
+    }else{
+        eNbList[min_enb_ap].userNum++;
+        userList[userIndex].bsType=LTE;
+        userList[userIndex].bsId=min_enb_ap;
+        return true;
+    }
+}
+
+bool connectWiFi(int userIndex, int min_wifi_ap){
+    if(!(userList[userIndex].bsType==WIFI && userList[userIndex].bsId==min_wifi_ap))
+        userList[userIndex].handoverTime++;
+    if(wifiApList[min_wifi_ap].userNum>MAXWIFIUSER){
+        wifiApList[min_wifi_ap].failNum++;
+        return false;
+    }else{
+        wifiApList[min_wifi_ap].userNum++;
+        userList[userIndex].bsType=WIFI;
+        userList[userIndex].bsId=min_wifi_ap;
+        return true;
+    }
+}
+
+void requestHandover(int userIndex, bool isConnectLte, bool isConnectWiFi, int min_enb_ap, int min_wifi_ap)
 {
-    user u=userList[userindex];
+    user u=userList[userIndex];
     if(u.bsType==WIFI){
         wifiApList[u.bsId].userNum--;
     }else if(u.bsType==LTE){
         eNbList[u.bsId].userNum--;
     }
-    if(type==WIFI){
-        wifiApList[id].userNum++;
-    }else if(type==LTE){
-        eNbList[id].userNum++;
+    
+    if(isConnectWiFi==false && isConnectLte==false){
+        connectUMTS(userIndex);
+    }else if(isConnectWiFi==false && isConnectLte==true){
+        if(!connectLTE(userIndex, min_enb_ap)){
+            connectUMTS(userIndex);
+        }
     }
-    userList[userindex].bsType=type;
-    userList[userindex].bsId=id;
-    //if(userindex==1)cout<<u.bsType<<" "<<type<<endl;
-    if(u.bsType!=type) {
-        //cout<<userList[userindex].bsType<<" "<<userList[userindex].bsId<<" => "<<type<<" "<<id<<endl;
-        userList[userindex].handoverTime++;
-        
+    else if(isConnectWiFi==true && isConnectLte==false){
+        if(!connectWiFi(userIndex, min_wifi_ap)){
+            connectUMTS(userIndex);
+        }
+    }
+    else if(isConnectWiFi==true && isConnectLte==true){
+        if(!connectLTE(userIndex, min_enb_ap)){
+            if(!connectWiFi(userIndex, min_wifi_ap)){
+                connectUMTS(userIndex);
+            }
+        }
     }
 }
+
+// void requestHandover(int userindex, int type, int id)
+// {
+//     user u=userList[userindex];
+//     if(u.bsType==WIFI){
+//         wifiApList[u.bsId].userNum--;
+//     }else if(u.bsType==LTE){
+//         eNbList[u.bsId].userNum--;
+//     }
+//     if(type==WIFI){
+//         wifiApList[id].userNum++;
+//     }else if(type==LTE){
+//         eNbList[id].userNum++;
+//     }
+//     userList[userindex].bsType=type;
+//     userList[userindex].bsId=id;
+//     //if(userindex==1)cout<<u.bsType<<" "<<type<<endl;
+//     if(u.bsType!=type) {
+//         //cout<<userList[userindex].bsType<<" "<<userList[userindex].bsId<<" => "<<type<<" "<<id<<endl;
+//         userList[userindex].handoverTime++;
+        
+//     }
+// }
 
 void UpdateState()
 {
@@ -143,7 +210,8 @@ void UpdateState()
         //BFHP
         user u=userList[i];
         // if(u.handoverTime>=maxHandoverTime){
-        //     u.bsType=UMTS;
+        //     userList[i].bsType=UMTS;
+        //     userList[i].id=0;
         //     continue;
         // }
         mob = wifiNodes.Get(i)->GetObject<MobilityModel>();
@@ -176,23 +244,24 @@ void UpdateState()
         if(min_enb_dis == lteRadius*2*MAXLTEGRID+100)
             isConnectLte=false;
 
-        int newBsType=UMTS, newId=0;
-        if(isConnectWiFi==false && isConnectLte==false){
-            newBsType=UMTS;
-            newId=0;
-        }else if(isConnectWiFi==false && isConnectLte==true){
-            newBsType=LTE;
-            newId=min_enb_ap;
-        }else if(isConnectWiFi==true && isConnectLte==false){
-            newBsType=WIFI;
-            newId=min_wifi_ap;
-        }else if(isConnectWiFi==true && isConnectLte==true){
-            newBsType=LTE;
-            newId=min_enb_ap;
-        }
-        //if(i==1)cout<<userList[i].bsType<<" => ";
-        requestHandover(i, newBsType, newId);
-        //if(i==1)cout<<userList[i].bsType<<endl;
+        // int newBsType=UMTS, newId=0;
+        // if(isConnectWiFi==false && isConnectLte==false){
+        //     newBsType=UMTS;
+        //     newId=0;
+        // }else if(isConnectWiFi==false && isConnectLte==true){
+        //     newBsType=LTE;
+        //     newId=min_enb_ap;
+        // }else if(isConnectWiFi==true && isConnectLte==false){
+        //     newBsType=WIFI;
+        //     newId=min_wifi_ap;
+        // }else if(isConnectWiFi==true && isConnectLte==true){
+        //     newBsType=LTE;
+        //     newId=min_enb_ap;
+        // }
+        ////if(i==1)cout<<userList[i].bsType<<" => ";
+        //requestHandover(i, newBsType, newId);
+        requestHandover(i, isConnectLte, isConnectWiFi, min_enb_ap, min_wifi_ap);
+        ////if(i==1)cout<<userList[i].bsType<<endl;
     }
 
     for(int i=0;i<eNbList.size();++i){
